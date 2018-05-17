@@ -1,7 +1,7 @@
 # Cryptography-course-blind-signature
 El-gamal cryptosystem
 
-Schorr digital signature
+Schnorr digital signature
 
-Schnor blind signature
+Schnorr blind signature
 
