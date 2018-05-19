@@ -18,10 +18,23 @@ typedef struct
     BIGNUM *b;
 } ELG_encrypted_msg;
 
+typedef struct 
+{
+    BIGNUM *m;
+    BIGNUM *r;
+    BIGNUM *s;
+} ELG_signed_msg;
+
 int generate_key_pair(uint32_t key_size, ELG_key_pair *key);
+
 int encrypt(ELG_key_pair *key, BIGNUM *message, ELG_encrypted_msg **encrypted);
 int decrypt(ELG_key_pair *key, ELG_encrypted_msg *encrypted, BIGNUM **decrypted);
-void ELG_key_pair_cleanup(ELG_key_pair *key);
+int sign(ELG_key_pair *key, uint8_t *message, uint32_t message_len, ELG_signed_msg **signed_msg);
+int verify(ELG_key_pair *key, ELG_signed_msg *signed_msg);
+
 ELG_encrypted_msg *ELG_enc_msg_new();
+ELG_signed_msg *ELG_signed_msg_new();
+void ELG_key_pair_cleanup(ELG_key_pair *key);
 void ELG_enc_msg_cleanup(ELG_encrypted_msg *m);
+void ELG_signed_msg_cleanup(ELG_signed_msg *m);
 #endif // EL_GAMAL_H

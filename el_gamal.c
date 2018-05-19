@@ -108,6 +108,7 @@ int encrypt(ELG_key_pair *key, BIGNUM *message, ELG_encrypted_msg **encrypted)
         printf("Failed to BN_pseudo_rand_range\n");
         goto err;
     }
+
     if (!(ctx = BN_CTX_new()))
         goto err;
 
@@ -158,11 +159,164 @@ err:
     return ret;
 }
 
+int sign(ELG_key_pair *key, uint8_t *message, uint32_t message_len, ELG_signed_msg **signature)
+{
+    int ret = 0;
+    BIGNUM *k = NULL, *pmin1 = NULL, *tmp = NULL, *r = NULL, *s = NULL, *inverse = NULL, *m = NULL;
+    BN_CTX *ctx = NULL;
+    uint8_t *digest = NULL;
+    uint32_t digest_len;
+    
+    if (!(digest_len = generate_digest(message, message_len, &digest)))
+        return 0;
+
+    if (!(k = BN_new()) || !(pmin1 = BN_dup(key->p))|| !(tmp = BN_new()))
+        goto err;
+
+    if (!BN_sub_word(pmin1, 1))
+        goto err;
+
+    if (!(ctx = BN_CTX_new()))
+        goto err;
+
+    /* we should find such k in (1 < k < p-1) and gcd(k, p-1) = 1*/
+    do 
+    {
+        if (!BN_pseudo_rand_range(k, pmin1))
+        {
+            printf("Failed to BN_pseudo_rand_range\n");
+            goto err;
+        }
+        if (!BN_gcd(tmp, k, pmin1, ctx))
+            goto err;
+    }
+    while(!BN_is_one(tmp));
+    
+    if (!(r = BN_new()))
+        goto err;
+    
+    if (!BN_mod_exp(r, key->g, k, key->p, ctx))
+        goto err;
+
+    if (!BN_mod_mul(tmp, key->x, r, pmin1, ctx))
+        goto err;
+    
+    if (!(inverse = BN_new()))
+        goto err;
+
+    if (!BN_mod_inverse(inverse, k, pmin1, ctx))
+        goto err;
+
+    if (!(s = BN_new()) || !(m = BN_new()))
+        goto err;
+
+    if (!BN_bin2bn(digest, digest_len, m))
+        goto err;
+
+    if (!BN_mod_sub(s, m, tmp, pmin1, ctx))
+        goto err;
+
+     if (!BN_mod_mul(s, s, inverse, pmin1, ctx))
+        goto err;
+    
+    (*signature)->m = m;
+    (*signature)->r = r;
+    (*signature)->s = s;
+    
+    ret = 1;
+err:
+    if (!ret)
+    {   
+        BN_free(r);
+        BN_free(s);
+        BN_free(m);
+    }
+    if (digest)
+        free(digest);
+    BN_free(k);
+    BN_free(pmin1);
+    BN_free(tmp);
+    BN_CTX_free(ctx);
+    BN_free(inverse);
+    return ret;
+}
+
+int verify(ELG_key_pair *key, ELG_signed_msg *signed_msg)
+{
+    int is_valid = 0;
+    BN_CTX *ctx = NULL;
+    BIGNUM *pmin1 = NULL, *y = NULL, *r = NULL, *g = NULL;
+    uint8_t *digest = NULL, *message = NULL;
+    uint32_t digest_len = 0, message_len = BN_num_bytes(signed_msg->m);
+
+    if (!(pmin1 = BN_dup(key->p)))
+        return 0;
+
+    if (BN_is_zero(signed_msg->r) || BN_is_zero(signed_msg->s))
+    {
+        printf("Signature is invalid\n");
+        goto err;
+    }
+
+    if ((BN_cmp(key->p, signed_msg->r) != 1) || (BN_cmp(pmin1, signed_msg->s) != 1))
+    {
+        printf("Signature is invalid\n");
+        goto err;
+    }
+    if (!(message = OPENSSL_malloc(message_len)))
+        goto err;
+
+    if (!(message_len = BN_bn2bin(signed_msg->m, message)))
+        goto err;
+
+    if (!(digest_len = generate_digest(message, message_len, &digest)))
+        goto err;
+
+    if (!(y = BN_new()) || !(r = BN_new()) || !(g = BN_new()))
+        goto err;
+
+    if (!(ctx = BN_CTX_new()))
+        goto err;
+
+    if (!BN_mod_exp(y, key->y, signed_msg->r, key->p, ctx))
+        goto err;
+    
+    if (!BN_mod_exp(r, signed_msg->r, signed_msg->s, key->p, ctx))
+        goto err;
+
+    if (!BN_mod_exp(g, key->g, signed_msg->m, key->p, ctx))
+        goto err;
+
+    if (!BN_mod_mul(y, y, r, key->p, ctx))
+        goto err;
+    
+    if (BN_cmp(y, g) == 0)
+    {
+        printf("Signature verified successfully\n");
+    }
+    else goto err;
+        
+    is_valid = 1;
+
+err:
+    BN_free(pmin1);
+    BN_free(g);
+    BN_CTX_free(ctx);
+    BN_free(y);
+    BN_free(r);
+    if (digest)
+        free(digest);
+    if (message)
+        free(message);
+    return is_valid;
+}
+
 int main()
 {
     ELG_key_pair *key;
     BIGNUM *M, *decrypted;
     ELG_encrypted_msg *encrypted;
+    ELG_signed_msg *signature;
 
     uint8_t message[] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
     uint32_t message_len = sizeof(message);
@@ -188,7 +342,7 @@ int main()
     if (!(encrypted = ELG_enc_msg_new()))
     {
         printf("Failed to allocate memory\n");
-        exit(0);
+        goto err;
     }
 
     if (!encrypt(key, M, &encrypted))
@@ -203,11 +357,30 @@ int main()
         goto err;
     }
 
+    if (!(signature = ELG_signed_msg_new()))
+    {
+        printf("Failed to allocate memory\n");
+        goto err;
+    }
+
+    if (!sign(key, message, message_len, &signature))
+    {
+        printf("Failed to sign message\n");
+        goto err;
+    }
+
+    if (!verify(key, signature))
+    {
+        printf("Failed to verify signature\n");
+        goto err;
+    }
+
 err:
     ELG_key_pair_cleanup(key);
     BN_free(M);
     ELG_enc_msg_cleanup(encrypted);
     BN_free(decrypted);
+    ELG_signed_msg_cleanup(signature);
     return 0;
 }
 
@@ -242,5 +415,30 @@ void ELG_enc_msg_cleanup(ELG_encrypted_msg *m)
     
     BN_free(m->a);
     BN_free(m->b);
+    OPENSSL_free(m);
+}
+
+ELG_signed_msg *ELG_signed_msg_new()
+{
+    ELG_signed_msg *m = OPENSSL_malloc(sizeof(ELG_signed_msg));
+    if (!m) return NULL;
+    m->m = BN_new();
+    m->r = BN_new();
+    m->s = BN_new();
+    if (!m->m || !m->r || !m->s)
+    {
+        ELG_signed_msg_cleanup(m);
+        return NULL;
+    }
+    return m;
+}
+
+void ELG_signed_msg_cleanup(ELG_signed_msg *m)
+{
+    if (!m) return;
+    
+    BN_free(m->m);
+    BN_free(m->r);
+    BN_free(m->s);
     OPENSSL_free(m);
 }

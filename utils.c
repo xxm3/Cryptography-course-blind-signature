@@ -103,3 +103,34 @@ void print_bn(BIGNUM *n, char *in)
     printf("%s %s\n", in, str);
     free(str);
 }
+
+uint32_t generate_digest(const uint8_t *message, uint32_t message_len, uint8_t **digest)
+{
+    uint32_t digest_len;
+    EVP_MD_CTX *ctx;
+
+    if(!(ctx = EVP_MD_CTX_create()))
+        return 0;
+
+    if (EVP_DigestInit_ex(ctx, EVP_sha256(), NULL) <= 0)
+        goto err;
+
+    if (EVP_DigestUpdate(ctx, message, message_len) <= 0)
+        goto err;
+
+    digest_len = EVP_MD_size(EVP_sha256());
+    if (!(*digest = (uint8_t *)OPENSSL_malloc(digest_len)))
+    {
+        digest_len = 0;
+        goto err;
+    }    
+
+    if (EVP_DigestFinal_ex(ctx, *digest, &digest_len) <= 0)
+        digest_len = 0;
+
+err:
+    EVP_MD_CTX_free(ctx);
+    if (!digest_len)
+        OPENSSL_free(*digest);
+    return digest_len; 
+}
