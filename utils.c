@@ -1,6 +1,6 @@
 #include "utils.h"
 
-static int isprime(BIGNUM *p, BN_CTX *ctx)
+static int is_prime(BIGNUM *p, BN_CTX *ctx)
 {
     return BN_is_prime_fasttest_ex(p, BN_prime_checks, ctx, 1, NULL);
 }
@@ -24,7 +24,7 @@ static int nextprime(BIGNUM *p, BN_CTX *ctx)
             return 0;
         }  
     }
-    while((test = isprime(p, ctx)) == 0);
+    while((test = is_prime(p, ctx)) == 0);
     
     if (test == -1) 
     {
@@ -34,65 +34,72 @@ static int nextprime(BIGNUM *p, BN_CTX *ctx)
     else return 1;
 }
 
-int is_primitive_root(BIGNUM *g, BIGNUM *p, BIGNUM *pmin1)
+static int is_primroot(BIGNUM *g, BIGNUM *p, BIGNUM *pmin1, BN_CTX *ctx)
 {
-    int ret = -1;
-    BIGNUM *tmpq, *tmp_rem, *tmpd;
-    BN_CTX *ctx;
-    if (!(ctx = BN_CTX_new()) ||
-        !(tmp_rem = BN_new()) ||
-        !(tmpq = BN_new())    ||
-        !(tmpd = BN_new())      )
-    {
-        printf("Failed to allocate memory");
-        goto err;
-    }
-
-    if (!BN_mod(tmp_rem, g, p, ctx))
-    {
-        printf("Failed to BN_mod");
-        goto err;
-    }
+    BIGNUM *temp_q, *temp_r, *temp_d;
+    int ret = 1; /*assume we have a generator */
     
-    if (BN_is_zero(tmp_rem))
-        return 0;
-
-    if (!BN_set_word(tmpq, 2))
+    if (!(temp_r = BN_new()) ||
+        !(temp_q = BN_new()) ||
+        !(temp_d = BN_new())) 
     {
-        printf("Failed to BN_set_word\n");
-        return -1;
+        ret = -1;
+        goto err;
     }
-    ret = 1;
+
+    if (!BN_mod(temp_r, g, p, ctx)) 
+        return -1;
+
+    /* do check if g is zero mod p */
+    if (BN_is_zero(temp_r))
+        return 0;
+  
+    if (!BN_set_word(temp_q, 2)) 
+        return -1;
+
     do
     {
-        if (!BN_div(tmpd, tmp_rem, pmin1, tmpq, ctx))
-        {
-            printf("Failed to BN_div\n");
-            return -1;
-        }
+        if (!BN_div(temp_d, temp_r, pmin1, temp_q, ctx))
+    	    return -1;
 
-        if (BN_is_zero(tmp_rem))
-        {
-            if (!BN_mod_exp(tmp_rem, g, tmpd, p, ctx))
-            {
-                printf("Failed to BN_mod_exp\n");
-                return -1;
-            }
-            if (BN_is_one(tmp_rem)) ret = 0;
-        }
+        if (BN_is_zero(temp_r))
+	    {
+	        if (!BN_mod_exp(temp_r, g, temp_d, p, ctx))
+	           return -1;
+            /* if we got one as a small power of g, then g is not a primitive root */
+	        if (BN_is_one(temp_r)) ret = 0;
+	    }
 
-        if (!nextprime(tmpq, ctx))
-        {
-            printf("Failed to find next prime\n");
-            return -1;
-        }    
+        if (!nextprime(temp_q, ctx)) 
+	        return -1;
     }
-    while((ret == 1) && (BN_cmp(tmpq, p) == -1));
+    while((ret == 1) && (BN_cmp(temp_q, p) == -1));
+  /* repeat until definitely not a generator or q is not less than p */ 
 
 err:
-    BN_free(tmp_rem);
-    BN_free(tmpq);
-    BN_free(tmpd);
-    BN_CTX_free(ctx);
+    BN_free(temp_q);
+    BN_free(temp_r);
+    BN_free(temp_d);
     return ret;
+}
+
+int primroot(BIGNUM *g, BIGNUM *p, BIGNUM *pmin1, BN_CTX *ctx)
+{
+    int test;
+    do {
+        if (!BN_add_word(g, 1)) return 0;
+    }while ((test = is_primroot(g, p, pmin1, ctx)) == 0);
+
+    if (test == -1) return 0;
+    else return 1;
+}
+
+void print_bn(BIGNUM *n, char *in)
+{
+    static char buff[] = "Value = ";
+    char *str = BN_bn2dec(n);
+    if (!in)
+        in = buff;
+    printf("%s %s\n", in, str);
+    free(str);
 }

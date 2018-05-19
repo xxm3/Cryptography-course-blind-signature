@@ -8,12 +8,12 @@ int generate_key_pair(uint32_t key_size, ELG_key_pair *key)
 {
     int ret = 0;
     BN_CTX *ctx = NULL;
-    BIGNUM *p, *g = NULL, *pmin1 = NULL, *x = NULL, *y = NULL;
+    BIGNUM *p, *g = NULL, *pmin1 = NULL, *x = NULL, *y = NULL, *tmp;
     
     if (!(p = BN_new()))
     {
         printf("Failed to allocate memory\n");
-        return ret;
+        return -1;
     }
 
     RAND_seed(rnd_seed, sizeof(rnd_seed));
@@ -42,19 +42,12 @@ int generate_key_pair(uint32_t key_size, ELG_key_pair *key)
         printf("Failed to allocate memory\n");
         goto err;
     }
-    
-    do 
-    {
-        if (!BN_add_word(g, 1))
-        {
-            printf("Failed to BN_add_word\n");
-            goto err;
-        }
-    } 
-    while ((ret = is_primitive_root(g, p, pmin1)) == 0);
-    if (ret == -1)
+    if (!BN_one(g))
         goto err;
-    
+
+    if (!primroot(g, p, pmin1, ctx)) // need optimization
+        goto err;
+
     if (!(x = BN_new()))
     {
         printf("Failed to allocate memory\n");
@@ -79,14 +72,6 @@ int generate_key_pair(uint32_t key_size, ELG_key_pair *key)
         goto err; 
     }
 
-    // char *num = BN_bn2dec(x);
-    // printf("x=%s\n", num);
-    // num = BN_bn2dec(g);
-    // printf("g=%s\n", num);
-    // num = BN_bn2dec(y);
-    // printf("y=%s\n", num);
-    // num = BN_bn2dec(p);
-    // printf("p=%s\n", num);
     key->x = x;
     key->g = g;
     key->p = p;
@@ -105,22 +90,124 @@ err:
     return ret;
 }
 
+int encrypt(ELG_key_pair *key, BIGNUM *message, ELG_encrypted_msg **encrypted)
+{
+    int ret = 0;
+    BIGNUM *k = NULL, *pmin1 = NULL, *a = NULL, *b = NULL;
+    BN_CTX *ctx = NULL;
+
+    if (!(k = BN_new()) || !(pmin1 = BN_dup(key->p)) ||
+        !(a = BN_new()) || !(b = BN_new()))
+        goto err;
+    
+    if (!BN_sub_word(pmin1, 1))
+        goto err;
+
+    if (!BN_pseudo_rand_range(k, pmin1))
+    {
+        printf("Failed to BN_pseudo_rand_range\n");
+        goto err;
+    }
+    if (!(ctx = BN_CTX_new()))
+        goto err;
+
+    if (!BN_mod_exp((*encrypted)->a, key->g, k, key->p, ctx))
+        goto err;
+   
+    if (!BN_mod_exp(b, key->y, k, key->p, ctx))
+        goto err;
+
+    if (!BN_mod_mul((*encrypted)->b, b, message, key->p, ctx))
+    {
+        ret = 0;
+        goto err;
+    }       
+   
+    ret = 1;
+err:
+    BN_free(k);
+    BN_free(a);
+    BN_free(b);
+    BN_free(pmin1);
+    BN_CTX_free(ctx);
+    return ret;
+}
+
+int decrypt(ELG_key_pair *key, ELG_encrypted_msg *encrypted, BIGNUM **decrypted)
+{
+    int ret = 0;
+    BIGNUM *tmp;
+    BN_CTX *ctx;
+   
+    if (!(tmp = BN_new()) || !(ctx = BN_CTX_new()))
+        goto err;
+
+    if (!BN_mod_exp(tmp, encrypted->a, key->x, key->p, ctx))
+        goto err;
+
+    if (!BN_mod_inverse(tmp, tmp, key->p, ctx))
+        goto err;    
+    
+    if (!BN_mod_mul(*decrypted, tmp, encrypted->b, key->p, ctx))
+        goto err; 
+
+    ret = 1; 
+err:
+    BN_free(tmp);
+    BN_CTX_free(ctx);
+    return ret;
+}
+
 int main()
 {
     ELG_key_pair *key;
+    BIGNUM *M, *decrypted;
+    ELG_encrypted_msg *encrypted;
+
+    uint8_t message[] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
+    uint32_t message_len = sizeof(message);
+
     if (!(key = OPENSSL_malloc(sizeof(ELG_key_pair))))
     {
         printf("Failed to allocate memory\n");
         exit(0);
     }
 
-    if (generate_key_pair(14, key) == -1)
-    {
+    if (generate_key_pair(10, key) == -1) //tested with small nums,
+    {                                     //cuz primeroot is expensive in such implementation
         printf("Failed to generate_key_pair\n");
         goto err;
     }
+
+    if (!(M = BN_new()) || !(decrypted = BN_new()))
+        goto err;
+    
+    if (!BN_bin2bn(message, message_len, M))
+        goto err;
+
+    if (!(encrypted = ELG_enc_msg_new()))
+    {
+        printf("Failed to allocate memory\n");
+        exit(0);
+    }
+
+    if (!encrypt(key, M, &encrypted))
+    {
+        printf("Failed to encrypt message\n");
+        goto err;
+    }
+
+    if (!decrypt(key, encrypted, &decrypted)) // decrypted mod p = message mod p
+    {
+        printf("Failed to decrypt encrypted\n");
+        goto err;
+    }
+
 err:
     ELG_key_pair_cleanup(key);
+    BN_free(M);
+    ELG_enc_msg_cleanup(encrypted);
+    BN_free(decrypted);
     return 0;
 }
 
@@ -133,4 +220,27 @@ void ELG_key_pair_cleanup(ELG_key_pair *key)
     BN_free(key->p);
     BN_free(key->g);
     OPENSSL_free(key);
+}
+
+ELG_encrypted_msg *ELG_enc_msg_new()
+{
+    ELG_encrypted_msg *m = OPENSSL_malloc(sizeof(ELG_encrypted_msg));
+    if (!m) return NULL;
+    m->a = BN_new();
+    m->b = BN_new();
+    if (!m->a || !m->b)
+    {
+        ELG_enc_msg_cleanup(m);
+        return NULL;
+    }
+    return m;
+}
+
+void ELG_enc_msg_cleanup(ELG_encrypted_msg *m)
+{
+    if (!m) return;
+    
+    BN_free(m->a);
+    BN_free(m->b);
+    OPENSSL_free(m);
 }

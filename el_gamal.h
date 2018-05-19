@@ -14,15 +14,14 @@ typedef struct
 
 typedef struct 
 {
-    BIGNUM *y;
-    BIGNUM *p;
-    BIGNUM *g;
-} ELG_public_key;
+    BIGNUM *a;
+    BIGNUM *b;
+} ELG_encrypted_msg;
 
 int generate_key_pair(uint32_t key_size, ELG_key_pair *key);
-int encrypt(ELG_key_pair *key, uint8_t *message, uint8_t *encrypted);
-int decrypt(ELG_key_pair *key, uint8_t *encrypted, uint8_t *decrypted);
-
+int encrypt(ELG_key_pair *key, BIGNUM *message, ELG_encrypted_msg **encrypted);
+int decrypt(ELG_key_pair *key, ELG_encrypted_msg *encrypted, BIGNUM **decrypted);
 void ELG_key_pair_cleanup(ELG_key_pair *key);
-
+ELG_encrypted_msg *ELG_enc_msg_new();
+void ELG_enc_msg_cleanup(ELG_encrypted_msg *m);
 #endif // EL_GAMAL_H
