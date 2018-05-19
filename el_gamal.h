@@ -1,7 +1,8 @@
 #ifndef EL_GAMAL_H
 #define EL_GAMAL_H
 #include "utils.h"
-
+#include <stdint.h>
+#include <stdio.h>
 enum sizes {P_SIZE_1024 = 1024};
 
 typedef struct 

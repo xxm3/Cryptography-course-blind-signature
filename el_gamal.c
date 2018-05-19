@@ -1,7 +1,5 @@
 #include "el_gamal.h"
-#include <stdint.h>
-#include <stdio.h>
-
+#include "schnorr.h"
 static const uint8_t rnd_seed[] = "string to make the random number generator";
 
 int gen_elg_key_pair(uint32_t key_size, ELG_key_pair *key)
@@ -232,7 +230,7 @@ err:
         BN_free(m);
     }
     if (digest)
-        free(digest);
+        OPENSSL_free(digest);
     BN_free(k);
     BN_free(pmin1);
     BN_free(tmp);
@@ -302,84 +300,10 @@ err:
     BN_free(y);
     BN_free(r);
     if (digest)
-        free(digest);
+        OPENSSL_free(digest);
     if (message)
-        free(message);
+        OPENSSL_free(message);
     return is_valid;
-}
-
-int main()
-{
-    ELG_key_pair *key;
-    BIGNUM *M, *decrypted;
-    ELG_enc_msg *encrypted;
-    ELG_signed_msg *signature;
-
-    uint8_t message[] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
-    uint32_t message_len = sizeof(message);
-
-    if (!(key = OPENSSL_malloc(sizeof(ELG_key_pair))))
-    {
-        printf("Failed to allocate memory\n");
-        exit(0);
-    }
-    
-    if (gen_elg_key_pair(10, key) == -1) //tested with small nums,
-    {                                     //cuz primeroot is expensive in such implementation
-        printf("Failed to gen_elg_key_pair\n");
-        goto err;
-    }
-
-    if (!(M = BN_new()) || !(decrypted = BN_new()))
-        goto err;
-    
-    if (!BN_bin2bn(message, message_len, M))
-        goto err;
-
-    if (!(encrypted = ELG_enc_msg_new()))
-    {
-        printf("Failed to allocate memory\n");
-        goto err;
-    }
-
-    if (!encrypt(key, M, &encrypted))
-    {
-        printf("Failed to encrypt message\n");
-        goto err;
-    }
-
-    if (!decrypt(key, encrypted, &decrypted)) // decrypted mod p = message mod p
-    {
-        printf("Failed to decrypt encrypted\n");
-        goto err;
-    }
-
-    if (!(signature = ELG_signed_msg_new()))
-    {
-        printf("Failed to allocate memory\n");
-        goto err;
-    }
-
-    if (!sign(key, message, message_len, &signature))
-    {
-        printf("Failed to sign message\n");
-        goto err;
-    }
-
-    // if (!verify(key, signature))
-    // {
-    //     printf("Failed to verify signature\n");
-    //     goto err;
-    // }
-    
-
-err:
-    ELG_key_pair_cleanup(key);
-    BN_free(M);
-    ELG_enc_msg_cleanup(encrypted);
-    BN_free(decrypted);
-    ELG_signed_msg_cleanup(signature);
-    return 0;
 }
 
 void ELG_key_pair_cleanup(ELG_key_pair *key)

@@ -101,7 +101,7 @@ void print_bn(BIGNUM *n, char *in)
     if (!in)
         in = buff;
     printf("%s %s\n", in, str);
-    free(str);
+    OPENSSL_free(str);
 }
 
 uint32_t generate_digest(const uint8_t *message, uint32_t message_len, uint8_t **digest)

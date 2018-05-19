@@ -3,8 +3,9 @@ CCFLAGS= -std=c11 -g -Wall
 LIB= -lcrypto
 OUT= lab4_elgamal_schnorr
 SRCS= el_gamal.c \
-	  utils.c
-	 # schnorr.c
+	  utils.c \
+	  schnorr.c \
+	  main.c
 OBJS=$(SRCS:.c=.o)
 all	:	$(OUT)
 $(OUT)	:	$(OBJS)
