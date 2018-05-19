@@ -4,7 +4,7 @@
 
 static const uint8_t rnd_seed[] = "string to make the random number generator";
 
-int generate_key_pair(uint32_t key_size, ELG_key_pair *key)
+int gen_elg_key_pair(uint32_t key_size, ELG_key_pair *key)
 {
     int ret = 0;
     BN_CTX *ctx = NULL;
@@ -90,7 +90,7 @@ err:
     return ret;
 }
 
-int encrypt(ELG_key_pair *key, BIGNUM *message, ELG_encrypted_msg **encrypted)
+int encrypt(ELG_key_pair *key, BIGNUM *message, ELG_enc_msg **encrypted)
 {
     int ret = 0;
     BIGNUM *k = NULL, *pmin1 = NULL, *a = NULL, *b = NULL;
@@ -134,7 +134,7 @@ err:
     return ret;
 }
 
-int decrypt(ELG_key_pair *key, ELG_encrypted_msg *encrypted, BIGNUM **decrypted)
+int decrypt(ELG_key_pair *key, ELG_enc_msg *encrypted, BIGNUM **decrypted)
 {
     int ret = 0;
     BIGNUM *tmp;
@@ -290,11 +290,8 @@ int verify(ELG_key_pair *key, ELG_signed_msg *signed_msg)
     if (!BN_mod_mul(y, y, r, key->p, ctx))
         goto err;
     
-    if (BN_cmp(y, g) == 0)
-    {
-        printf("Signature verified successfully\n");
-    }
-    else goto err;
+    if (BN_cmp(y, g) != 0)
+        goto err;
         
     is_valid = 1;
 
@@ -315,7 +312,7 @@ int main()
 {
     ELG_key_pair *key;
     BIGNUM *M, *decrypted;
-    ELG_encrypted_msg *encrypted;
+    ELG_enc_msg *encrypted;
     ELG_signed_msg *signature;
 
     uint8_t message[] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
@@ -326,10 +323,10 @@ int main()
         printf("Failed to allocate memory\n");
         exit(0);
     }
-
-    if (generate_key_pair(10, key) == -1) //tested with small nums,
+    
+    if (gen_elg_key_pair(10, key) == -1) //tested with small nums,
     {                                     //cuz primeroot is expensive in such implementation
-        printf("Failed to generate_key_pair\n");
+        printf("Failed to gen_elg_key_pair\n");
         goto err;
     }
 
@@ -369,11 +366,12 @@ int main()
         goto err;
     }
 
-    if (!verify(key, signature))
-    {
-        printf("Failed to verify signature\n");
-        goto err;
-    }
+    // if (!verify(key, signature))
+    // {
+    //     printf("Failed to verify signature\n");
+    //     goto err;
+    // }
+    
 
 err:
     ELG_key_pair_cleanup(key);
@@ -395,9 +393,9 @@ void ELG_key_pair_cleanup(ELG_key_pair *key)
     OPENSSL_free(key);
 }
 
-ELG_encrypted_msg *ELG_enc_msg_new()
+ELG_enc_msg *ELG_enc_msg_new()
 {
-    ELG_encrypted_msg *m = OPENSSL_malloc(sizeof(ELG_encrypted_msg));
+    ELG_enc_msg *m = OPENSSL_malloc(sizeof(ELG_enc_msg));
     if (!m) return NULL;
     m->a = BN_new();
     m->b = BN_new();
@@ -409,7 +407,7 @@ ELG_encrypted_msg *ELG_enc_msg_new()
     return m;
 }
 
-void ELG_enc_msg_cleanup(ELG_encrypted_msg *m)
+void ELG_enc_msg_cleanup(ELG_enc_msg *m)
 {
     if (!m) return;
     
@@ -422,14 +420,6 @@ ELG_signed_msg *ELG_signed_msg_new()
 {
     ELG_signed_msg *m = OPENSSL_malloc(sizeof(ELG_signed_msg));
     if (!m) return NULL;
-    m->m = BN_new();
-    m->r = BN_new();
-    m->s = BN_new();
-    if (!m->m || !m->r || !m->s)
-    {
-        ELG_signed_msg_cleanup(m);
-        return NULL;
-    }
     return m;
 }
 
