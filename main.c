@@ -5,11 +5,12 @@
 int main()
 {
     ELG_key_pair *key;
-    BIGNUM *M, *decrypted, *privkey = NULL;
+    BIGNUM *M, *decrypted, *privkey = NULL, *blind_pk = NULL, *r = NULL, *e = NULL, *k = NULL,
+    *s = NULL;
     ELG_enc_msg *encrypted;
     ELG_signed_msg *signature;
-    Schnorr_signed_msg * schnorr_signature;
-    Schnorr_pub_key *pubkey = NULL;
+    Schnorr_signed_msg * schnorr_signature, *blind_sign;
+    Schnorr_pub_key *pubkey = NULL, *blind_pubk = NULL;
 
     uint8_t message[] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
     uint32_t message_len = sizeof(message);
@@ -92,14 +93,44 @@ int main()
         goto err;
     }
 
+    if (!(blind_pk = BN_new()) ||
+        !(k = BN_new()) || !(s = BN_new()))
+        goto err;
+
+    if (!(blind_pubk = Schnorr_pub_key_new()))
+        goto err;
+
+    if(!gen_schnorr_pub_key(blind_pubk, &blind_pk))
+        goto err;
+
+    if (!schnorr_prepare(blind_pubk, blind_pk, &r, &k))
+        goto err;
+    
+    if (!schnorr_commit(blind_pubk, blind_pk, r, message, message_len, &e))
+        goto err;
+
+    if (!schnorr_blind_sign(blind_pubk, blind_pk, e, k, &s))
+        goto err;
+    
+    if (!schnorr_blind_finish(blind_pubk, blind_pk, e, s, r))
+    {
+        printf("Failed to verify sign");
+        goto err;
+    }
 err:
     ELG_key_pair_cleanup(key);
     BN_free(M);
+    BN_free(r);
+    BN_free(e);
+    BN_free(s);
+    BN_free(k);
     ELG_enc_msg_cleanup(encrypted);
     BN_free(decrypted);
     BN_free(privkey);
+    BN_free(blind_pk);
     ELG_signed_msg_cleanup(signature);
     Schnorr_pub_key_cleanup(pubkey);
+    Schnorr_pub_key_cleanup(blind_pubk);
     Schnorr_signed_msg_cleanup(schnorr_signature);
     return 0;
 }

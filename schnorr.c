@@ -164,13 +164,153 @@ int schnorr_verify(Schnorr_pub_key *pubkey, Schnorr_signed_msg *signature)
     is_valid = 1;
 
 err:
-   
+    OPENSSL_free(m);
+    OPENSSL_free(rstr);
+    OPENSSL_free(digest);
     BN_free(e);
     BN_free(r);
     BN_free(tmp);
     BN_free(tmp2);
     BN_CTX_free(ctx);
     return is_valid;  
+}
+
+int schnorr_prepare(Schnorr_pub_key *pubkey, BIGNUM *privkey, BIGNUM **r, BIGNUM **k)
+{
+    int ret = 0;
+    BN_CTX *ctx = NULL;
+
+    if (!BN_rand_range(*k, pubkey->p))
+        goto err;
+
+    if (!(ctx = BN_CTX_new()))
+        goto err;
+
+    if (!(*r = BN_new()))
+        goto err;
+
+    if (!BN_mod_exp(*r, pubkey->g, *k, pubkey->p, ctx))
+        goto err;
+    
+    ret = 1;
+err:
+    BN_CTX_free(ctx);
+    return ret;
+}
+
+int schnorr_commit(Schnorr_pub_key *pubkey, BIGNUM *privkey, 
+                   BIGNUM *r, uint8_t *message, uint32_t message_len, BIGNUM **e)
+{
+    int ret = 0;
+    uint8_t *digest = NULL, *input;
+    uint32_t digest_len;
+    BIGNUM *a = NULL, *b = NULL, *tmp = NULL, *tmp2 = NULL, *r2;
+    BN_CTX *ctx = NULL;
+
+    if (!(a = BN_new()) || !(b = BN_new()))
+        goto err;
+
+    if (!BN_rand_range(a, pubkey->q) || !BN_rand_range(b, pubkey->q))
+        goto err;
+
+    if (!(ctx = BN_CTX_new()))
+        goto err;
+
+    if (!(r2 = BN_new()))
+        goto err;
+
+    if (!(tmp = BN_new()))
+        goto err;
+
+    if (!BN_mod_exp(tmp, pubkey->g, a, pubkey->p, ctx))
+        goto err;
+
+    if (!BN_mod_mul(tmp, tmp, r, pubkey->p, ctx))
+        goto err;
+
+    if (!BN_mod_exp(r2, pubkey->y, b, pubkey->p, ctx))
+        goto err;
+
+    if (!BN_mod_mul(r2, r2, tmp, pubkey->p, ctx))
+        goto err;
+
+    if (!(input = (uint8_t *)OPENSSL_malloc(BN_num_bytes(r2) + message_len)))
+        goto err;
+    
+    memcpy((void*)input, (void*)message, message_len);
+
+    if (!BN_bn2bin(r2, input + message_len))
+        goto err;
+
+    if (!(digest_len = generate_digest(input, BN_num_bytes(r2) + message_len, &digest)))
+        goto err;    
+
+    if (!(*e = BN_new()))
+        goto err;
+
+    if (!BN_bin2bn(digest, digest_len, *e))
+        goto err;
+
+    if (!BN_mod_add(*e, *e, b, pubkey->q, ctx))
+        goto err;
+    
+    ret = 1;
+err:
+    
+    OPENSSL_free(digest);
+    OPENSSL_free(input);
+    BN_free(a);
+    BN_free(b);
+    BN_free(r2);
+    BN_free(tmp);
+    BN_CTX_free(ctx);
+    return ret;
+}
+
+int schnorr_blind_sign(Schnorr_pub_key *pubkey, BIGNUM *privkey, 
+                       BIGNUM *e,  BIGNUM *k, BIGNUM **s)
+{
+    int ret = 0;
+    BIGNUM *tmp;
+    BN_CTX *ctx;
+    ctx = BN_CTX_new();
+    tmp = BN_new();
+    if (!BN_mod_mul(tmp, e, privkey, pubkey->q, ctx))
+        goto err;
+    if (!BN_mod_add(*s, tmp, k, pubkey->q, ctx))
+        goto err;
+    ret = 1;
+err:
+    BN_CTX_free(ctx);
+    BN_free(tmp);
+    return ret;
+}
+
+int schnorr_blind_finish(Schnorr_pub_key *pubkey, BIGNUM *privkey, 
+                         BIGNUM *e, BIGNUM *s, BIGNUM *r)
+{
+    int is_valid = 0;
+    BIGNUM *tmp, *tmp2;
+    BN_CTX *ctx;
+    ctx = BN_CTX_new();
+    tmp = BN_new();
+    tmp2 = BN_new();
+    if (!BN_mod_exp(tmp, pubkey->y, e, pubkey->p, ctx))
+        goto err;
+    if (!BN_mod_inverse(tmp, tmp, pubkey->p, ctx))
+        goto err;
+    if (!BN_mod_exp(tmp2, pubkey->g, s, pubkey->p, ctx))
+        goto err;
+    if (!BN_mod_mul(tmp2, tmp2, tmp, pubkey->p, ctx))
+        goto err;
+    if (BN_cmp(tmp2, r) != 0)
+        goto err;
+    is_valid = 1;
+err:
+    BN_CTX_free(ctx);
+    BN_free(tmp);
+    BN_free(tmp2);
+    return is_valid;
 }
 
 Schnorr_signed_msg *Schnorr_signed_msg_new()
