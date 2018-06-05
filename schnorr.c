@@ -17,7 +17,7 @@ int gen_schnorr_pub_key(Schnorr_pub_key *pubkey, BIGNUM **privkey)
     if (!BN_pseudo_rand_range(*privkey, pubkey->q))
     {
         printf("Failed to BN_pseudo_rand_range\n");
-        goto err;
+        return 0;
     }
 
     if (!(ctx = BN_CTX_new()) || !(pubkey->y = BN_new()))
